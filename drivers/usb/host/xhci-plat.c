@@ -34,6 +34,21 @@
 
 static struct hc_driver __read_mostly xhci_plat_hc_driver;
 
+#ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+/*
+ * USB audio offloading hands the isochronous USB audio stream to the ABOX
+ * DSP (xHCI rings in ABOX URAM, snd-usb-audio vendor ops). It only produces
+ * sound when the audio HAL drives the ABOX USB path (Samsung/Exynos proxy
+ * HAL). Userspace that writes to the USB ALSA card directly (AOSP
+ * audio.usb(v2).default) needs it off: boot with
+ * xhci_plat_hcd.usb_audio_offload=0.
+ */
+static bool usb_audio_offload = true;
+module_param(usb_audio_offload, bool, 0444);
+MODULE_PARM_DESC(usb_audio_offload,
+		 "Offload USB audio to the ABOX DSP (default: true)");
+#endif
+
 static int xhci_plat_setup(struct usb_hcd *hcd);
 static int xhci_plat_start(struct usb_hcd *hcd);
 static int is_rewa_enabled;
@@ -485,6 +500,11 @@ static int xhci_plat_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+	if (!usb_audio_offload) {
+		dev_info(&pdev->dev, "USB audio offloading disabled, not using URAM\n");
+		goto skip_uram;
+	}
+
 	ret = of_property_read_u32(parent->of_node,
 				"xhci_use_uram_for_audio", &value);
 	if (ret == 0 && value == 1) {
@@ -544,6 +564,11 @@ skip_uram:
 		goto dealloc_usb2_hcd;
 
 #ifdef CONFIG_SND_EXYNOS_USB_AUDIO
+	if (!usb_audio_offload) {
+		dev_info(&pdev->dev, "USB Audio offloading disabled (usb_audio_offload=0)\n");
+		goto skip_usb_audio_offload;
+	}
+
 	ret = of_property_read_u32(parent->of_node,
 				"usb_audio_offloading", &value);
 	if (ret == 0 && value == 1) {
@@ -564,6 +589,7 @@ skip_uram:
 	xhci->out_addr = xhci_data.out_data_addr;
 	xhci->in_dma = xhci_data.in_data_dma;
 	xhci->in_addr = xhci_data.in_data_addr;
+skip_usb_audio_offload:
 #endif
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &xhci_plat_attr_group);
